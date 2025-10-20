@@ -14,6 +14,7 @@ class WebRTCService {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' }
+        // Add TURN servers here for production
       ]
     };
   }
@@ -33,61 +34,60 @@ class WebRTCService {
   }
 
   // Connect to the Socket.IO server
-  // In webrtcService.js - Update the connect method
-connect() {
-  return new Promise((resolve, reject) => {
-    this.socket = io(this.serverUrl);
-    
-    this.socket.on('connect', () => {
-      console.log('Socket connected:', this.socket.id);
-      this.setupSocketListeners();
-      resolve();  // Resolve when connected
-    });
-    
-    this.socket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
-      reject(error);
-    });
-  });
-}
+  connect() {
+    return new Promise((resolve, reject) => {
+      // Allow server URL from environment; fallback to localhost
+      const url = this.serverUrl || 'http://localhost:5000';
 
+      // More robust options for deployed apps (retry, timeout)
+      this.socket = io(url, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        timeout: 20000,
+      });
 
-  // Set up all Socket.IO event listeners
+      this.socket.on('connect', () => {
+        console.log('Socket connected:', this.socket.id);
+        this.setupSocketListeners();
+        resolve();
+      });
+
+      this.socket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
+        reject(error);
+      });
+
+      this.socket.on('disconnect', (reason) => {
+        console.log('Socket disconnected:', reason);
+      });
+    });
+  }
+
   setupSocketListeners() {
-    this.socket.on('connect', () => {
-      console.log('Socket connected:', this.socket.id);
-    });
+    // avoid re-registering if already set
+    if (!this.socket) return;
 
-    // Handle existing users in the room
     this.socket.on('existing-users', (users) => {
       console.log('Existing users in room:', users);
       users.forEach(user => {
         this.createPeerConnection(user.userId, true);
-        this.emit('user-joined', { 
-          userId: user.userId, 
-          userName: user.userName 
-        });
+        this.emit('user-joined', { userId: user.userId, userName: user.userName });
       });
     });
 
-    // Handle new user connecting
     this.socket.on('user-connected', (userInfo) => {
       console.log('New user connected:', userInfo);
       this.createPeerConnection(userInfo.userId, false);
-      this.emit('user-joined', { 
-        userId: userInfo.userId, 
-        userName: userInfo.userName 
-      });
+      this.emit('user-joined', { userId: userInfo.userId, userName: userInfo.userName });
     });
 
-    // Handle user disconnecting
     this.socket.on('user-disconnected', (userId) => {
       console.log('User disconnected:', userId);
       this.removePeerConnection(userId);
       this.emit('user-left', { userId });
     });
 
-    // Handle WebRTC signaling
     this.socket.on('offer', async (data) => {
       console.log('Received offer from:', data.caller);
       await this.handleOffer(data.offer, data.caller);
@@ -103,12 +103,13 @@ connect() {
       await this.handleICECandidate(data.candidate, data.from);
     });
 
-    // Chat messages
+    // IMPORTANT: backend now emits the full message object as data
+    // so we pass it directly to frontend listeners
     this.socket.on('chat-message', (data) => {
-      this.emit('receive-message', data.message);
+      // data = { id, sender, message, timestamp }
+      this.emit('receive-message', data);
     });
 
-    // Screen sharing events
     this.socket.on('screen-share-started', (userId) => {
       this.emit('screen-share-started', { userId });
     });
@@ -117,7 +118,6 @@ connect() {
       this.emit('screen-share-stopped', { userId });
     });
 
-    // Toggle events
     this.socket.on('toggle-audio', ({ userId, enabled }) => {
       this.emit('toggle-audio', { userId, enabled });
     });
@@ -132,22 +132,20 @@ connect() {
     return this.localStream;
   }
 
-  // In webrtcService.js - Update joinRoom method
-async joinRoom(roomId, userInfo) {
-  if (!this.socket || !this.socket.connected) {
-    throw new Error('Socket not connected. Call connect() first.');
-  }
-  
-  console.log(`Attempting to join room ${roomId} as ${userInfo.userId}`);
-  this.currentRoomId = roomId;
-  this.currentUserId = userInfo.userId;
-  this.socket.emit('join-room', roomId, userInfo);
-}
+  async joinRoom(roomId, userInfo) {
+    if (!this.socket || !this.socket.connected) {
+      throw new Error('Socket not connected. Call connect() first.');
+    }
 
+    console.log(`Attempting to join room ${roomId} as ${userInfo.userId}`);
+    this.currentRoomId = roomId;
+    this.currentUserId = userInfo.userId;
+    this.socket.emit('join-room', roomId, userInfo);
+  }
 
   async createPeerConnection(userId, isInitiator) {
     console.log(`Creating peer connection with ${userId}, initiator: ${isInitiator}`);
-    
+
     const peerConnection = new RTCPeerConnection(this.iceServers);
 
     // Add local stream tracks
@@ -160,10 +158,21 @@ async joinRoom(roomId, userInfo) {
     // Handle incoming remote stream
     peerConnection.ontrack = (event) => {
       console.log('Received remote stream from:', userId);
-      this.emit('stream-added', { userId, stream: event.streams[0] });
+      const remoteStream = event.streams[0];
+      // Emit stream for UI
+      this.emit('stream-added', { userId, stream: remoteStream });
+
+      // Force-play audio to avoid autoplay blocking on some browsers
+      try {
+        const audioEl = document.createElement('audio');
+        audioEl.autoplay = true;
+        audioEl.srcObject = remoteStream;
+        // keep element detached from DOM; browser will still attempt to autoplay once user interacts
+      } catch (err) {
+        console.warn('Auto-play audio setup failed', err);
+      }
     };
 
-    // Handle ICE candidates
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         this.socket.emit('ice-candidate', {
@@ -174,7 +183,6 @@ async joinRoom(roomId, userInfo) {
       }
     };
 
-    // Handle connection state changes
     peerConnection.onconnectionstatechange = () => {
       console.log(`Connection state with ${userId}:`, peerConnection.connectionState);
       if (peerConnection.connectionState === 'failed') {
@@ -196,9 +204,9 @@ async joinRoom(roomId, userInfo) {
     try {
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
-      
-      this.socket.emit('offer', { 
-        offer, 
+
+      this.socket.emit('offer', {
+        offer,
         target: targetUserId,
         caller: this.currentUserId
       });
@@ -220,9 +228,9 @@ async joinRoom(roomId, userInfo) {
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-      
-      this.socket.emit('answer', { 
-        answer, 
+
+      this.socket.emit('answer', {
+        answer,
         target: callerId,
         answerer: this.currentUserId
       });
@@ -266,23 +274,30 @@ async joinRoom(roomId, userInfo) {
     }
   }
 
+  // Replace the video track in all peer connections (used for screen share)
   replaceVideoTrack(newTrack) {
     this.peers.forEach(peer => {
-      const sender = peer.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (sender) {
-        sender.replaceTrack(newTrack);
+      try {
+        const sender = peer.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) {
+          sender.replaceTrack(newTrack);
+        }
+      } catch (err) {
+        console.warn('replaceTrack error:', err);
       }
     });
   }
 
   leaveRoom() {
     this.peers.forEach((peerConnection) => {
-      peerConnection.close();
+      try { peerConnection.close(); } catch (e) {}
     });
     this.peers.clear();
 
     if (this.localStream) {
-      this.localStream.getTracks().forEach(track => track.stop());
+      try {
+        this.localStream.getTracks().forEach(track => track.stop());
+      } catch (e) {}
       this.localStream = null;
     }
 
@@ -293,7 +308,7 @@ async joinRoom(roomId, userInfo) {
 
   disconnect() {
     if (this.socket) {
-      this.socket.disconnect();
+      try { this.socket.disconnect(); } catch (e) {}
       this.socket = null;
     }
   }
