@@ -1,16 +1,20 @@
-// src/pages/MeetingRoom.jsx
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Copy } from 'lucide-react';
 import useWebRTC from '../hooks/useWebRTC';
 import VideoPlayer from '../components/VideoPlayer';
 
+
 const MeetingRoom = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
 
-  const userId = 'user-' + Math.random().toString(36).substr(2, 9);
-  const userName = 'Guest-' + userId.substr(5);
+  // ✅ Stable user identity (prevents re-renders creating new sockets)
+  const userId = useMemo(
+    () => 'user-' + Math.random().toString(36).substr(2, 9),
+    []
+  );
+  const userName = useMemo(() => 'Guest-' + userId.substr(5), [userId]);
 
   const {
     localStream,
@@ -28,15 +32,11 @@ const MeetingRoom = () => {
     stopScreenShare,
     sendMessage,
     leaveMeeting,
+    isMeetingEnded,
   } = useWebRTC(roomId, userId, userName);
 
   const [chatInput, setChatInput] = useState('');
   const localVideoRef = useRef(null);
-
-  // ✅ wrapper for safe SPA navigation
-  const handleLeaveMeeting = () => {
-    leaveMeeting(() => navigate('/')); // uses React Router, no logout
-  };
 
   // Play local stream
   useEffect(() => {
@@ -45,12 +45,9 @@ const MeetingRoom = () => {
     }
   }, [localStream]);
 
-  // Debug: Log remote streams
-  useEffect(() => {
-    console.log('Remote streams updated:', remoteStreams);
-    console.log('Remote streams size:', remoteStreams.size);
-    console.log('Remote streams entries:', Array.from(remoteStreams.entries()));
-  }, [remoteStreams]);
+  const handleLeaveMeeting = () => {
+    leaveMeeting(() => navigate('/'));
+  };
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -82,7 +79,7 @@ const MeetingRoom = () => {
 
       {/* Main Content */}
       <div className="flex h-[calc(100vh-80px)]">
-        {/* Video Grid - Left Side */}
+        {/* Left: Video Grid */}
         <div className="flex-1 p-4">
           <div className="mb-4 flex justify-between items-center bg-gray-800 p-4 rounded">
             <div>
@@ -97,10 +94,8 @@ const MeetingRoom = () => {
               onClick={copyMeetingLink}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 rounded hover:bg-blue-700"
             >
-              <Copy size={16} />
-              Copy Link
+              <Copy size={16} /> Copy Link
             </button>
-            {/* ✅ Fixed: leaveMeeting now uses SPA navigation */}
             <button
               onClick={handleLeaveMeeting}
               className="px-6 py-2 bg-red-600 rounded hover:bg-red-700"
@@ -133,35 +128,30 @@ const MeetingRoom = () => {
               >
                 <VideoPlayer stream={stream} participantId={participantId} />
                 <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded">
-                  {participants.find((p) => p.userId === participantId)?.userName ||
-                    participantId}
+                  {participants.find(p => p.userId === participantId)?.userName || participantId}
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Connection Status */}
+          {/* Status */}
           {connectionStatus !== 'connected' && (
             <div className="mt-4 p-4 bg-yellow-800 rounded">
               Connection Status: {connectionStatus}
             </div>
           )}
 
-          {/* Error Display */}
           {error && (
-            <div className="mt-4 p-4 bg-red-800 rounded">
-              Error: {error}
-            </div>
+            <div className="mt-4 p-4 bg-red-800 rounded">Error: {error}</div>
           )}
         </div>
 
-        {/* Chat - Right Side */}
+        {/* Right: Chat */}
         <div className="w-96 bg-gray-800 flex flex-col">
           <div className="p-4 border-b border-gray-700">
             <h2 className="text-xl font-semibold">Chat</h2>
           </div>
 
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {messages.map((msg, index) => (
               <div key={index} className="bg-gray-700 p-2 rounded">
@@ -174,7 +164,6 @@ const MeetingRoom = () => {
             ))}
           </div>
 
-          {/* Chat Input */}
           <div className="p-4 border-t border-gray-700">
             <div className="flex gap-2">
               <input
@@ -196,14 +185,12 @@ const MeetingRoom = () => {
         </div>
       </div>
 
-      {/* Controls - Bottom */}
+      {/* Bottom Controls */}
       <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 flex gap-4">
         <button
           onClick={toggleAudio}
           className={`px-6 py-3 rounded-lg font-semibold ${
-            isAudioEnabled
-              ? 'bg-gray-700 hover:bg-gray-600'
-              : 'bg-red-600 hover:bg-red-700'
+            isAudioEnabled ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-700'
           }`}
         >
           {isAudioEnabled ? 'Mute Mic' : 'Unmute Mic'}
@@ -211,9 +198,7 @@ const MeetingRoom = () => {
         <button
           onClick={toggleCamera}
           className={`px-6 py-3 rounded-lg font-semibold ${
-            isVideoEnabled
-              ? 'bg-gray-700 hover:bg-gray-600'
-              : 'bg-red-600 hover:bg-red-700'
+            isVideoEnabled ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-700'
           }`}
         >
           {isVideoEnabled ? 'Turn Off Cam' : 'Turn On Cam'}
@@ -225,6 +210,9 @@ const MeetingRoom = () => {
           {isScreenSharing ? 'Stop Sharing' : 'Share Screen'}
         </button>
       </div>
+
+      {/* Meeting End Modal */}
+      <MeetingEndedModal show={isMeetingEnded} />
     </div>
   );
 };

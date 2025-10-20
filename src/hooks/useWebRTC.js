@@ -11,11 +11,14 @@ const useWebRTC = (roomId, userId, userName) => {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [error, setError] = useState(null);
+  const [isMeetingEnded, setIsMeetingEnded] = useState(false);
 
   const webrtcServiceRef = useRef(null);
 
   useEffect(() => {
-    if (!roomId || !userId) return;
+    if (!roomId || !userId || webrtcServiceRef.current) return; // ✅ run once
+
+    console.log('🧠 Initializing WebRTC only once for', userId);
 
     const initializeWebRTC = async () => {
       try {
@@ -23,18 +26,16 @@ const useWebRTC = (roomId, userId, userName) => {
         const service = new WebRTCService(import.meta.env.VITE_SERVER_URL || 'http://localhost:5000');
         webrtcServiceRef.current = service;
 
-        // ✅ Core WebRTC event listeners
-        service.on('user-joined', (data) => setParticipants(prev => [...prev, data]));
+        service.on('user-joined', (data) => setParticipants((prev) => [...prev, data]));
         service.on('user-left', (data) => {
-          setParticipants(prev => prev.filter(p => p.userId !== data.userId));
-          setRemoteStreams(prev => {
+          setParticipants((prev) => prev.filter((p) => p.userId !== data.userId));
+          setRemoteStreams((prev) => {
             const newStreams = new Map(prev);
             newStreams.delete(data.userId);
             return newStreams;
           });
         });
 
-        // ✅ Chat fix — normalize message structure
         service.on('receive-message', (msg) => {
           const normalizedMsg = {
             id: msg.id || Date.now().toString(),
@@ -42,42 +43,31 @@ const useWebRTC = (roomId, userId, userName) => {
             message: msg.message || msg.text || '',
             timestamp: msg.timestamp || new Date().toISOString(),
           };
-          setMessages(prev => [...prev, normalizedMsg]);
+          setMessages((prev) => [...prev, normalizedMsg]);
         });
 
-        // ✅ Handle meeting-ended event from backend
         service.on('meeting-ended', () => {
-          alert('The meeting has been ended by the host.');
-
-          // Cleanup WebRTC connections
+          setIsMeetingEnded(true);
           if (webrtcServiceRef.current) {
             webrtcServiceRef.current.leaveRoom();
             webrtcServiceRef.current.disconnect();
           }
-          if (localStream) {
-            localStream.getTracks().forEach(track => track.stop());
-          }
-
+          if (localStream) localStream.getTracks().forEach((track) => track.stop());
           setLocalStream(null);
           setRemoteStreams(new Map());
           setParticipants([]);
           setMessages([]);
           setConnectionStatus('disconnected');
-
-          // Redirect everyone to home
-          window.location.href = '/';
         });
 
-        // ✅ Handle new remote streams
         service.on('stream-added', ({ userId, stream }) => {
-          setRemoteStreams(prev => {
+          setRemoteStreams((prev) => {
             const newStreams = new Map(prev);
             newStreams.set(userId, stream);
             return newStreams;
           });
         });
 
-        // ✅ Start connection
         await service.connect();
         const stream = await service.getUserMedia({ video: true, audio: true });
         setLocalStream(stream);
@@ -96,60 +86,52 @@ const useWebRTC = (roomId, userId, userName) => {
       if (webrtcServiceRef.current) {
         webrtcServiceRef.current.leaveRoom();
         webrtcServiceRef.current.disconnect();
+        webrtcServiceRef.current = null;
       }
-      if (localStream) localStream.getTracks().forEach(track => track.stop());
+      if (localStream) localStream.getTracks().forEach((track) => track.stop());
     };
-  }, [roomId, userId, userName]);
+  }, [roomId, userId]);
 
-  // ✅ Toggle mic
   const toggleAudio = useCallback(() => {
     if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) {
-      audioTrack.enabled = !audioTrack.enabled;
-      setIsAudioEnabled(audioTrack.enabled);
-      webrtcServiceRef.current?.socket.emit('toggle-audio', { roomId, enabled: audioTrack.enabled });
+    const track = localStream.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      setIsAudioEnabled(track.enabled);
     }
-  }, [localStream, roomId]);
+  }, [localStream]);
 
-  // ✅ Toggle camera
   const toggleCamera = useCallback(() => {
     if (!localStream) return;
-    const videoTrack = localStream.getVideoTracks()[0];
-    if (videoTrack) {
-      videoTrack.enabled = !videoTrack.enabled;
-      setIsVideoEnabled(videoTrack.enabled);
-      webrtcServiceRef.current?.socket.emit('toggle-video', { roomId, enabled: videoTrack.enabled });
+    const track = localStream.getVideoTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      setIsVideoEnabled(track.enabled);
     }
-  }, [localStream, roomId]);
+  }, [localStream]);
 
-  // ✅ Leave meeting (SPA-safe with callback)
   const leaveMeeting = useCallback(
     (onLeaveRedirect) => {
       if (webrtcServiceRef.current) {
         webrtcServiceRef.current.socket.emit('meeting-ended', { roomId });
         webrtcServiceRef.current.leaveRoom();
         webrtcServiceRef.current.disconnect();
+        webrtcServiceRef.current = null;
       }
-
-      if (localStream) localStream.getTracks().forEach(track => track.stop());
-
+      if (localStream) localStream.getTracks().forEach((track) => track.stop());
       setLocalStream(null);
       setRemoteStreams(new Map());
       setParticipants([]);
       setMessages([]);
       setConnectionStatus('disconnected');
-
       if (onLeaveRedirect) onLeaveRedirect();
     },
     [localStream, roomId]
   );
 
-  // ✅ Send message (with sender info)
   const sendMessage = useCallback(
     (text) => {
       if (!webrtcServiceRef.current || !text.trim()) return;
-
       const message = {
         id: Date.now().toString(),
         userId,
@@ -158,16 +140,12 @@ const useWebRTC = (roomId, userId, userName) => {
         timestamp: new Date().toISOString(),
         roomId,
       };
-
-      // Add locally
-      setMessages(prev => [...prev, {
+      setMessages((prev) => [...prev, {
         id: message.id,
         sender: message.userName,
         message: message.text,
         timestamp: message.timestamp,
       }]);
-
-      // Emit to others
       webrtcServiceRef.current.socket.emit('chat-message', { roomId, message });
     },
     [roomId, userId, userName]
@@ -187,6 +165,7 @@ const useWebRTC = (roomId, userId, userName) => {
     toggleCamera,
     sendMessage,
     leaveMeeting,
+    isMeetingEnded,
   };
 };
 
