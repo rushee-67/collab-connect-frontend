@@ -212,7 +212,6 @@ const MeetingRoom = () => {
       </div>
 
       {/* Meeting End Modal */}
-      <MeetingEndedModal show={isMeetingEnded} />
     </div>
   );
 };
