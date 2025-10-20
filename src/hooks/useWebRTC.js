@@ -23,7 +23,7 @@ const useWebRTC = (roomId, userId, userName) => {
         const service = new WebRTCService(import.meta.env.VITE_SERVER_URL || 'http://localhost:5000');
         webrtcServiceRef.current = service;
 
-        // Event Listeners
+        // ✅ Core WebRTC event listeners
         service.on('user-joined', (data) => setParticipants(prev => [...prev, data]));
         service.on('user-left', (data) => {
           setParticipants(prev => prev.filter(p => p.userId !== data.userId));
@@ -34,26 +34,41 @@ const useWebRTC = (roomId, userId, userName) => {
           });
         });
 
-        // ✅ Chat fix
+        // ✅ Chat fix — normalize message structure
         service.on('receive-message', (msg) => {
-          setMessages(prev => [...prev, msg]);
           const normalizedMsg = {
             id: msg.id || Date.now().toString(),
-            sender: msg.userName || msg.sender || 'Unknown',
-            message: msg.text || msg.message || '',
+            sender: msg.sender || msg.userName || 'Unknown',
+            message: msg.message || msg.text || '',
             timestamp: msg.timestamp || new Date().toISOString(),
           };
           setMessages(prev => [...prev, normalizedMsg]);
         });
 
-
-        // ✅ Meeting end broadcast
+        // ✅ Handle meeting-ended event from backend
         service.on('meeting-ended', () => {
-          alert('Meeting ended by host.');
-          leaveMeeting(() => navigate('/'));
+          alert('The meeting has been ended by the host.');
+
+          // Cleanup WebRTC connections
+          if (webrtcServiceRef.current) {
+            webrtcServiceRef.current.leaveRoom();
+            webrtcServiceRef.current.disconnect();
+          }
+          if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+          }
+
+          setLocalStream(null);
+          setRemoteStreams(new Map());
+          setParticipants([]);
+          setMessages([]);
+          setConnectionStatus('disconnected');
+
+          // Redirect everyone to home
+          window.location.href = '/';
         });
 
-        // Stream handlers
+        // ✅ Handle new remote streams
         service.on('stream-added', ({ userId, stream }) => {
           setRemoteStreams(prev => {
             const newStreams = new Map(prev);
@@ -62,7 +77,7 @@ const useWebRTC = (roomId, userId, userName) => {
           });
         });
 
-        // Connect + Join Room
+        // ✅ Start connection
         await service.connect();
         const stream = await service.getUserMedia({ video: true, audio: true });
         setLocalStream(stream);
@@ -84,9 +99,9 @@ const useWebRTC = (roomId, userId, userName) => {
       }
       if (localStream) localStream.getTracks().forEach(track => track.stop());
     };
-  }, []);
+  }, [roomId, userId, userName]);
 
-  // ✅ Toggle mic/video works fine
+  // ✅ Toggle mic
   const toggleAudio = useCallback(() => {
     if (!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
@@ -97,6 +112,7 @@ const useWebRTC = (roomId, userId, userName) => {
     }
   }, [localStream, roomId]);
 
+  // ✅ Toggle camera
   const toggleCamera = useCallback(() => {
     if (!localStream) return;
     const videoTrack = localStream.getVideoTracks()[0];
@@ -107,59 +123,55 @@ const useWebRTC = (roomId, userId, userName) => {
     }
   }, [localStream, roomId]);
 
-  // ✅ Leave meeting broadcast
-  // Leave the meeting (with optional redirect callback)
-const leaveMeeting = useCallback(
-  (onLeaveRedirect) => {
-    if (webrtcServiceRef.current) {
-      // Notify everyone that the meeting ended
-      webrtcServiceRef.current.socket.emit('meeting-ended', { roomId });
+  // ✅ Leave meeting (SPA-safe with callback)
+  const leaveMeeting = useCallback(
+    (onLeaveRedirect) => {
+      if (webrtcServiceRef.current) {
+        webrtcServiceRef.current.socket.emit('meeting-ended', { roomId });
+        webrtcServiceRef.current.leaveRoom();
+        webrtcServiceRef.current.disconnect();
+      }
 
-      // Leave the WebRTC room and disconnect
-      webrtcServiceRef.current.leaveRoom();
-      webrtcServiceRef.current.disconnect();
-    }
+      if (localStream) localStream.getTracks().forEach(track => track.stop());
 
-    // Stop all local media tracks
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-    }
+      setLocalStream(null);
+      setRemoteStreams(new Map());
+      setParticipants([]);
+      setMessages([]);
+      setConnectionStatus('disconnected');
 
-    // Reset state
-    setLocalStream(null);
-    setRemoteStreams(new Map());
-    setParticipants([]);
-    setMessages([]);
-    setConnectionStatus('disconnected');
+      if (onLeaveRedirect) onLeaveRedirect();
+    },
+    [localStream, roomId]
+  );
 
-    // ✅ Use callback to navigate (no reload)
-    if (onLeaveRedirect) {
-      onLeaveRedirect(); // this will call navigate('/') in MeetingRoom
-    }
-  },
-  [localStream, roomId]
-);
+  // ✅ Send message (with sender info)
+  const sendMessage = useCallback(
+    (text) => {
+      if (!webrtcServiceRef.current || !text.trim()) return;
 
+      const message = {
+        id: Date.now().toString(),
+        userId,
+        userName,
+        text: text.trim(),
+        timestamp: new Date().toISOString(),
+        roomId,
+      };
 
-  // ✅ Send message fix
-  const sendMessage = useCallback((text) => {
-  if (!webrtcServiceRef.current || !text.trim()) return;
+      // Add locally
+      setMessages(prev => [...prev, {
+        id: message.id,
+        sender: message.userName,
+        message: message.text,
+        timestamp: message.timestamp,
+      }]);
 
-  const message = {
-    id: Date.now().toString(),
-    userId,
-    userName,
-    text: text.trim(),
-    sender: userName,
-    message: text.trim(),
-    timestamp: new Date().toISOString(),
-    roomId,
-  };
-
-  setMessages(prev => [...prev, message]);
-  webrtcServiceRef.current.socket.emit('chat-message', { roomId, message });
-  }, [roomId, userId, userName]);
-
+      // Emit to others
+      webrtcServiceRef.current.socket.emit('chat-message', { roomId, message });
+    },
+    [roomId, userId, userName]
+  );
 
   return {
     localStream,
@@ -174,7 +186,7 @@ const leaveMeeting = useCallback(
     toggleAudio,
     toggleCamera,
     sendMessage,
-    leaveMeeting
+    leaveMeeting,
   };
 };
 
