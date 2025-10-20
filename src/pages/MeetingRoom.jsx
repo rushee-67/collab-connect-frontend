@@ -8,7 +8,7 @@ import VideoPlayer from '../components/VideoPlayer';
 const MeetingRoom = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  
+
   const userId = 'user-' + Math.random().toString(36).substr(2, 9);
   const userName = 'Guest-' + userId.substr(5);
 
@@ -27,11 +27,16 @@ const MeetingRoom = () => {
     startScreenShare,
     stopScreenShare,
     sendMessage,
-    leaveMeeting
+    leaveMeeting,
   } = useWebRTC(roomId, userId, userName);
 
   const [chatInput, setChatInput] = useState('');
   const localVideoRef = useRef(null);
+
+  // ✅ wrapper for safe SPA navigation
+  const handleLeaveMeeting = () => {
+    leaveMeeting(() => navigate('/')); // uses React Router, no logout
+  };
 
   // Play local stream
   useEffect(() => {
@@ -66,7 +71,10 @@ const MeetingRoom = () => {
       <header className="bg-gray-800 p-4 flex justify-between items-center">
         <h1 className="text-2xl font-bold">Collab Connect</h1>
         <div className="flex gap-4 items-center">
-          <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600"
+          >
             Profile
           </button>
         </div>
@@ -92,8 +100,9 @@ const MeetingRoom = () => {
               <Copy size={16} />
               Copy Link
             </button>
+            {/* ✅ Fixed: leaveMeeting now uses SPA navigation */}
             <button
-              onClick={leaveMeeting}
+              onClick={handleLeaveMeeting}
               className="px-6 py-2 bg-red-600 rounded hover:bg-red-700"
             >
               Leave Meeting
@@ -118,13 +127,14 @@ const MeetingRoom = () => {
 
             {/* Remote Videos */}
             {Array.from(remoteStreams.entries()).map(([participantId, stream]) => (
-              <div key={participantId} className="relative bg-gray-800 rounded-lg overflow-hidden aspect-video">
-                <VideoPlayer
-                  stream={stream}
-                  participantId={participantId}
-                />
+              <div
+                key={participantId}
+                className="relative bg-gray-800 rounded-lg overflow-hidden aspect-video"
+              >
+                <VideoPlayer stream={stream} participantId={participantId} />
                 <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded">
-                  {participants.find(p => p.userId === participantId)?.userName || participantId}
+                  {participants.find((p) => p.userId === participantId)?.userName ||
+                    participantId}
                 </div>
               </div>
             ))}
@@ -150,14 +160,16 @@ const MeetingRoom = () => {
           <div className="p-4 border-b border-gray-700">
             <h2 className="text-xl font-semibold">Chat</h2>
           </div>
-          
+
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {messages.map((msg, index) => (
               <div key={index} className="bg-gray-700 p-2 rounded">
                 <div className="font-semibold text-sm">{msg.sender}</div>
                 <div>{msg.message}</div>
-                <div className="text-xs text-gray-400">{new Date(msg.timestamp).toLocaleTimeString()}</div>
+                <div className="text-xs text-gray-400">
+                  {new Date(msg.timestamp).toLocaleTimeString()}
+                </div>
               </div>
             ))}
           </div>
@@ -189,7 +201,9 @@ const MeetingRoom = () => {
         <button
           onClick={toggleAudio}
           className={`px-6 py-3 rounded-lg font-semibold ${
-            isAudioEnabled ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-700'
+            isAudioEnabled
+              ? 'bg-gray-700 hover:bg-gray-600'
+              : 'bg-red-600 hover:bg-red-700'
           }`}
         >
           {isAudioEnabled ? 'Mute Mic' : 'Unmute Mic'}
@@ -197,7 +211,9 @@ const MeetingRoom = () => {
         <button
           onClick={toggleCamera}
           className={`px-6 py-3 rounded-lg font-semibold ${
-            isVideoEnabled ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-700'
+            isVideoEnabled
+              ? 'bg-gray-700 hover:bg-gray-600'
+              : 'bg-red-600 hover:bg-red-700'
           }`}
         >
           {isVideoEnabled ? 'Turn Off Cam' : 'Turn On Cam'}
