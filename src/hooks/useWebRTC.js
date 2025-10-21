@@ -1,6 +1,5 @@
-// src/hooks/useWebRTC.js
-import { useState, useEffect, useCallback, useRef } from 'react';
-import WebRTCService from '../services/webrtcService';
+import { useState, useEffect, useCallback, useRef } from "react";
+import WebRTCService from "../services/webrtcService";
 
 const useWebRTC = (roomId, userId, userName, isHost = false) => {
   const [localStream, setLocalStream] = useState(null);
@@ -10,7 +9,7 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [error, setError] = useState(null);
   const [isMeetingEnded, setIsMeetingEnded] = useState(false);
 
@@ -19,18 +18,26 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
   useEffect(() => {
     if (!roomId || !userId || webrtcServiceRef.current) return;
 
-    console.log('🧠 Initializing WebRTC only once for', userId);
+    console.log("🧠 Initializing WebRTC only once for", userId);
 
     const initializeWebRTC = async () => {
       try {
-        setConnectionStatus('connecting');
-        const service = new WebRTCService(import.meta.env.VITE_SERVER_URL || 'http://localhost:5000');
+        setConnectionStatus("connecting");
+        const service = new WebRTCService(
+          import.meta.env.VITE_SERVER_URL || "http://localhost:5000"
+        );
         webrtcServiceRef.current = service;
 
-        // Participants join/leave
-        service.on('user-joined', (data) => setParticipants((prev) => [...prev, data]));
-        service.on('user-left', (data) => {
-          setParticipants((prev) => prev.filter((p) => p.userId !== data.userId));
+        // Participants joining
+        service.on("user-joined", (data) => {
+          setParticipants((prev) => [...prev, data]);
+        });
+
+        // Participants leaving
+        service.on("user-left", (data) => {
+          setParticipants((prev) =>
+            prev.filter((p) => p.userId !== data.userId)
+          );
           setRemoteStreams((prev) => {
             const newMap = new Map(prev);
             newMap.delete(data.userId);
@@ -38,40 +45,44 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
           });
         });
 
-        // Messages
-        service.on('receive-message', (msg) => {
+        // Chat message received
+        service.on("receive-message", (msg) => {
           const normalizedMsg = {
             id: msg.id || Date.now().toString(),
-            sender: msg.sender || msg.userName || 'Unknown',
-            message: msg.message || msg.text || '',
+            sender: msg.sender || msg.userName || "Unknown",
+            message: msg.message || msg.text || "",
             timestamp: msg.timestamp || new Date().toISOString(),
           };
           setMessages((prev) => [...prev, normalizedMsg]);
         });
 
-        // Meeting ended (by host)
-        service.on('meeting-ended', () => {
+        // Host ends meeting
+        service.on("meeting-ended", () => {
+          console.log("📢 Meeting ended event received");
           setIsMeetingEnded(true);
           if (webrtcServiceRef.current) {
             webrtcServiceRef.current.leaveRoom();
             webrtcServiceRef.current.disconnect();
             webrtcServiceRef.current = null;
           }
-          if (localStream) localStream.getTracks().forEach((track) => track.stop());
+          if (localStream)
+            localStream.getTracks().forEach((track) => track.stop());
           setLocalStream(null);
           setRemoteStreams(new Map());
           setParticipants([]);
           setMessages([]);
-          setConnectionStatus('disconnected');
+          setConnectionStatus("disconnected");
+          alert("Meeting has ended by the host.");
+          window.location.href = "/dashboard/home";
         });
 
-        // Unauthorized attempt
-        service.on('not-authorized', (msg) => {
-          alert(msg.message || 'Only the host can end the meeting.');
+        // Unauthorized end meeting attempt
+        service.on("not-authorized", (msg) => {
+          alert(msg.message || "Only host can end the meeting.");
         });
 
-        // Remote streams
-        service.on('stream-added', ({ userId: remoteId, stream }) => {
+        // New remote stream added
+        service.on("stream-added", ({ userId: remoteId, stream }) => {
           setRemoteStreams((prev) => {
             const newMap = new Map(prev);
             newMap.set(remoteId, stream);
@@ -80,14 +91,16 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
         });
 
         await service.connect();
+
         const stream = await service.getUserMedia({ video: true, audio: true });
         setLocalStream(stream);
+
         await service.joinRoom(roomId, { userId, userName });
-        setConnectionStatus('connected');
+        setConnectionStatus("connected");
       } catch (err) {
-        console.error('WebRTC init error:', err);
-        setError(err.message || 'Initialization failed');
-        setConnectionStatus('error');
+        console.error("WebRTC init error:", err);
+        setError(err.message || "Initialization failed");
+        setConnectionStatus("error");
       }
     };
 
@@ -99,50 +112,31 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
         webrtcServiceRef.current.disconnect();
         webrtcServiceRef.current = null;
       }
-      if (localStream) localStream.getTracks().forEach((track) => track.stop());
+      if (localStream) localStream.getTracks().forEach((t) => t.stop());
     };
   }, [roomId, userId]);
 
+  // Toggle Audio
   const toggleAudio = useCallback(() => {
     if (!localStream) return;
     const track = localStream.getAudioTracks()[0];
     if (track) {
       track.enabled = !track.enabled;
       setIsAudioEnabled(track.enabled);
-      webrtcServiceRef.current?.socket?.emit('toggle-audio', { roomId, userId, enabled: track.enabled });
     }
-  }, [localStream, roomId, userId]);
+  }, [localStream]);
 
+  // Toggle Camera
   const toggleCamera = useCallback(() => {
     if (!localStream) return;
     const track = localStream.getVideoTracks()[0];
     if (track) {
       track.enabled = !track.enabled;
       setIsVideoEnabled(track.enabled);
-      webrtcServiceRef.current?.socket?.emit('toggle-video', { roomId, userId, enabled: track.enabled });
     }
-  }, [localStream, roomId, userId]);
+  }, [localStream]);
 
-  // ✅ Leave or End Meeting (Host-Only)
-  const leaveMeeting = useCallback(
-    (onLeaveRedirect) => {
-      if (webrtcServiceRef.current) {
-        webrtcServiceRef.current.socket.emit('meeting-ended', { roomId, isHost });
-        webrtcServiceRef.current.leaveRoom();
-        webrtcServiceRef.current.disconnect();
-        webrtcServiceRef.current = null;
-      }
-      if (localStream) localStream.getTracks().forEach((track) => track.stop());
-      setLocalStream(null);
-      setRemoteStreams(new Map());
-      setParticipants([]);
-      setMessages([]);
-      setConnectionStatus('disconnected');
-      if (onLeaveRedirect) onLeaveRedirect();
-    },
-    [localStream, roomId, isHost]
-  );
-
+  // Send Chat Message
   const sendMessage = useCallback(
     (text) => {
       if (!webrtcServiceRef.current || !text.trim()) return;
@@ -163,33 +157,63 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
           timestamp: message.timestamp,
         },
       ]);
-      webrtcServiceRef.current.socket.emit('chat-message', { roomId, message });
+      webrtcServiceRef.current.socket.emit("chat-message", {
+        roomId,
+        message,
+      });
     },
     [roomId, userId, userName]
   );
 
+  // ✅ Host Ends or Participant Leaves
+  const leaveMeeting = useCallback(
+    (onLeaveRedirect) => {
+      if (webrtcServiceRef.current) {
+        webrtcServiceRef.current.socket.emit("meeting-ended", {
+          roomId,
+          isHost,
+        });
+        webrtcServiceRef.current.leaveRoom();
+        webrtcServiceRef.current.disconnect();
+        webrtcServiceRef.current = null;
+      }
+      if (localStream)
+        localStream.getTracks().forEach((track) => track.stop());
+      setLocalStream(null);
+      setRemoteStreams(new Map());
+      setParticipants([]);
+      setMessages([]);
+      setConnectionStatus("disconnected");
+
+      if (onLeaveRedirect) onLeaveRedirect();
+    },
+    [localStream, roomId, isHost]
+  );
+
+  // Screen Share Start/Stop
   const startScreenShare = useCallback(async () => {
     if (!webrtcServiceRef.current || isScreenSharing) return;
     try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
       const newTrack = screenStream.getVideoTracks()[0];
       webrtcServiceRef.current.replaceVideoTrack(newTrack);
       setIsScreenSharing(true);
       newTrack.onended = () => stopScreenShare();
-      webrtcServiceRef.current.socket.emit('screen-share-started', roomId);
     } catch (err) {
-      console.error('Failed to start screen share:', err);
-      setError('Screen sharing not supported or denied');
+      console.error("Screen share error:", err);
+      setError("Screen sharing failed.");
     }
-  }, [isScreenSharing, roomId]);
+  }, [isScreenSharing]);
 
   const stopScreenShare = useCallback(() => {
     if (!webrtcServiceRef.current || !isScreenSharing) return;
-    const cameraTrack = localStream?.getVideoTracks()[0];
-    if (cameraTrack) webrtcServiceRef.current.replaceVideoTrack(cameraTrack);
+    const camTrack = localStream?.getVideoTracks()[0];
+    if (camTrack) webrtcServiceRef.current.replaceVideoTrack(camTrack);
     setIsScreenSharing(false);
-    webrtcServiceRef.current.socket.emit('screen-share-stopped', roomId);
-  }, [isScreenSharing, localStream, roomId]);
+  }, [isScreenSharing, localStream]);
 
   return {
     localStream,
