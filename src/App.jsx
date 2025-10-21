@@ -2,13 +2,17 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import Dashboard from "./components/Dashboard.jsx";
 import { useState } from "react";
 
+// Import meeting pages
+import JoinMeeting from "./pages/JoinMeeting.jsx";
+import MeetingRoom from "./pages/MeetingRoom.jsx";
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showAuthForm, setShowAuthForm] = useState(false);
 
   const handleLogin = () => {
     setIsAuthenticated(true);
-    setShowAuthForm(false); // close modal after login/signup
+    setShowAuthForm(false);
   };
 
   const handleLogout = () => {
@@ -20,6 +24,7 @@ export default function App() {
   return (
     <Router>
       <Routes>
+        {/* Dashboard routes (with auth + layout) */}
         <Route
           path="/dashboard/*"
           element={
@@ -32,7 +37,12 @@ export default function App() {
             />
           }
         />
-        {/* Default redirect to homepage */}
+
+        {/* Meeting flow routes (outside dashboard) */}
+        <Route path="/join/:roomId" element={<JoinMeeting />} />
+        <Route path="/meeting/:roomId" element={<MeetingRoom />} />
+
+        {/* Default redirect */}
         <Route path="*" element={<Navigate to="/dashboard/home" />} />
       </Routes>
     </Router>

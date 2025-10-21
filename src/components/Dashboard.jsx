@@ -25,18 +25,18 @@ export default function Dashboard({
   };
 
   const handleStartQuickMeeting = () => {
-    // Generate a unique meeting ID
-    const newMeetingId = uuidv4();
-    // Navigate to the new meeting room
-    navigate(`/dashboard/meeting/${newMeetingId}`);
-  };
+  const newMeetingId = uuidv4();
+  // Navigate to join page as host
+  navigate(`/join/${newMeetingId}?host=true`);
+};
 
-  const handleJoinMeeting = (meetingId) => {
-    if (meetingId.trim()) {
-      // Navigate to the meeting with the entered ID
-      navigate(`/dashboard/meeting/${meetingId.trim()}`);
-    }
-  };
+const handleJoinMeeting = (meetingId) => {
+  if (meetingId.trim()) {
+    // Navigate to join page as participant
+    navigate(`/join/${meetingId.trim()}`);
+  }
+};
+
 
   // Helper function to require login
   const requireAuth = () => {
@@ -115,14 +115,6 @@ export default function Dashboard({
             }
           />
           {/* New route for the meeting room */}
-          <Route
-            path="meeting/:roomId"
-            element={
-              <ProtectedRoute isAuthenticated={isAuthenticated} setShowAuthForm={setShowAuthForm}>
-                <MeetingRoom />
-              </ProtectedRoute>
-            }
-          />
         </Routes>
       </div>
 
