@@ -1,3 +1,4 @@
+// src/hooks/useWebRTC.js
 import { useState, useEffect, useCallback, useRef } from "react";
 import WebRTCService from "../services/webrtcService";
 
@@ -18,26 +19,16 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
   useEffect(() => {
     if (!roomId || !userId || webrtcServiceRef.current) return;
 
-    console.log("🧠 Initializing WebRTC only once for", userId);
-
     const initializeWebRTC = async () => {
       try {
         setConnectionStatus("connecting");
-        const service = new WebRTCService(
-          import.meta.env.VITE_SERVER_URL || "http://localhost:5000"
-        );
+        const service = new WebRTCService(import.meta.env.VITE_SERVER_URL || "http://localhost:5000");
         webrtcServiceRef.current = service;
 
-        // Participants joining
-        service.on("user-joined", (data) => {
-          setParticipants((prev) => [...prev, data]);
-        });
-
-        // Participants leaving
+        // participants
+        service.on("user-joined", (data) => setParticipants((prev) => [...prev, data]));
         service.on("user-left", (data) => {
-          setParticipants((prev) =>
-            prev.filter((p) => p.userId !== data.userId)
-          );
+          setParticipants((prev) => prev.filter((p) => p.userId !== data.userId));
           setRemoteStreams((prev) => {
             const newMap = new Map(prev);
             newMap.delete(data.userId);
@@ -45,7 +36,7 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
           });
         });
 
-        // Chat message received
+        // messages — webrtcService emits 'receive-message' when socket receives a chat-message
         service.on("receive-message", (msg) => {
           const normalizedMsg = {
             id: msg.id || Date.now().toString(),
@@ -56,32 +47,36 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
           setMessages((prev) => [...prev, normalizedMsg]);
         });
 
-        // Host ends meeting
+        // meeting ended (host triggered)
         service.on("meeting-ended", () => {
-          console.log("📢 Meeting ended event received");
+          console.log("Meeting ended by host (received).");
           setIsMeetingEnded(true);
+
+          // cleanup
           if (webrtcServiceRef.current) {
             webrtcServiceRef.current.leaveRoom();
             webrtcServiceRef.current.disconnect();
             webrtcServiceRef.current = null;
           }
-          if (localStream)
-            localStream.getTracks().forEach((track) => track.stop());
+          if (localStream) {
+            localStream.getTracks().forEach((t) => t.stop());
+          }
           setLocalStream(null);
           setRemoteStreams(new Map());
           setParticipants([]);
           setMessages([]);
           setConnectionStatus("disconnected");
-          alert("Meeting has ended by the host.");
+
+          alert("Meeting was ended by the host.");
           window.location.href = "/dashboard/home";
         });
 
-        // Unauthorized end meeting attempt
+        // not-authorized feedback
         service.on("not-authorized", (msg) => {
           alert(msg.message || "Only host can end the meeting.");
         });
 
-        // New remote stream added
+        // stream added by peers
         service.on("stream-added", ({ userId: remoteId, stream }) => {
           setRemoteStreams((prev) => {
             const newMap = new Map(prev);
@@ -114,9 +109,9 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
       }
       if (localStream) localStream.getTracks().forEach((t) => t.stop());
     };
-  }, [roomId, userId]);
+  }, [roomId, userId, userName]);
 
-  // Toggle Audio
+  // toggle audio
   const toggleAudio = useCallback(() => {
     if (!localStream) return;
     const track = localStream.getAudioTracks()[0];
@@ -126,7 +121,7 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
     }
   }, [localStream]);
 
-  // Toggle Camera
+  // toggle camera
   const toggleCamera = useCallback(() => {
     if (!localStream) return;
     const track = localStream.getVideoTracks()[0];
@@ -136,7 +131,7 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
     }
   }, [localStream]);
 
-  // Send Chat Message
+  // send chat message
   const sendMessage = useCallback(
     (text) => {
       if (!webrtcServiceRef.current || !text.trim()) return;
@@ -148,6 +143,8 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
         timestamp: new Date().toISOString(),
         roomId,
       };
+
+      // add locally
       setMessages((prev) => [
         ...prev,
         {
@@ -157,63 +154,75 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
           timestamp: message.timestamp,
         },
       ]);
-      webrtcServiceRef.current.socket.emit("chat-message", {
-        roomId,
-        message,
-      });
+
+      // emit to backend (backend will broadcast to the room)
+      webrtcServiceRef.current.socket.emit("chat-message", { roomId, message });
     },
     [roomId, userId, userName]
   );
 
-  // ✅ Host Ends or Participant Leaves
-  const leaveMeeting = useCallback(
-    (onLeaveRedirect) => {
-      if (webrtcServiceRef.current) {
-        webrtcServiceRef.current.socket.emit("meeting-ended", {
-          roomId,
-          isHost,
-        });
-        webrtcServiceRef.current.leaveRoom();
-        webrtcServiceRef.current.disconnect();
-        webrtcServiceRef.current = null;
-      }
-      if (localStream)
-        localStream.getTracks().forEach((track) => track.stop());
-      setLocalStream(null);
-      setRemoteStreams(new Map());
-      setParticipants([]);
-      setMessages([]);
-      setConnectionStatus("disconnected");
-
-      if (onLeaveRedirect) onLeaveRedirect();
-    },
-    [localStream, roomId, isHost]
-  );
-
-  // Screen Share Start/Stop
+  // start screen share
   const startScreenShare = useCallback(async () => {
     if (!webrtcServiceRef.current || isScreenSharing) return;
     try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      });
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       const newTrack = screenStream.getVideoTracks()[0];
       webrtcServiceRef.current.replaceVideoTrack(newTrack);
       setIsScreenSharing(true);
       newTrack.onended = () => stopScreenShare();
+      // notify others via socket (webrtcService handles emitting)
+      webrtcServiceRef.current.socket.emit("screen-share-start", roomId);
     } catch (err) {
       console.error("Screen share error:", err);
       setError("Screen sharing failed.");
     }
-  }, [isScreenSharing]);
+  }, [isScreenSharing, roomId]);
 
+  // stop screen share
   const stopScreenShare = useCallback(() => {
     if (!webrtcServiceRef.current || !isScreenSharing) return;
     const camTrack = localStream?.getVideoTracks()[0];
     if (camTrack) webrtcServiceRef.current.replaceVideoTrack(camTrack);
     setIsScreenSharing(false);
-  }, [isScreenSharing, localStream]);
+    try {
+      webrtcServiceRef.current.socket.emit("screen-share-stop", roomId);
+    } catch (e) {}
+  }, [isScreenSharing, localStream, roomId]);
+
+  // leave meeting: if host -> end meeting for all, else just disconnect
+  const leaveMeeting = useCallback(
+    (onLeaveRedirect) => {
+      try {
+        if (webrtcServiceRef.current) {
+          if (isHost) {
+            // Host ends meeting for everyone
+            webrtcServiceRef.current.socket.emit("meeting-ended", { roomId, isHost: true });
+          } else {
+            // Participant leaves — inform server optionally
+            try {
+              webrtcServiceRef.current.socket.emit("leave-room", { roomId, userId });
+            } catch (e) {}
+          }
+
+          webrtcServiceRef.current.leaveRoom();
+          webrtcServiceRef.current.disconnect();
+          webrtcServiceRef.current = null;
+        }
+
+        if (localStream) localStream.getTracks().forEach((t) => t.stop());
+      } catch (err) {
+        console.error("Error during leave:", err);
+      } finally {
+        setLocalStream(null);
+        setRemoteStreams(new Map());
+        setParticipants([]);
+        setMessages([]);
+        setConnectionStatus("disconnected");
+        if (onLeaveRedirect) onLeaveRedirect();
+      }
+    },
+    [localStream, isHost, roomId, userId]
+  );
 
   return {
     localStream,

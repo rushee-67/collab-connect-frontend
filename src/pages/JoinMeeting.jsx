@@ -1,7 +1,8 @@
 // src/pages/JoinMeeting.jsx
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Video, User, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Video, User, ArrowRight } from "lucide-react";
+import AuthForm from "../components/AuthForm.jsx"; // your existing auth form. :contentReference[oaicite:2]{index=2}
 
 export default function JoinMeeting() {
   const { roomId } = useParams();
@@ -10,24 +11,49 @@ export default function JoinMeeting() {
   const params = new URLSearchParams(window.location.search);
   const isHost = params.get("host") === "true";
 
+  // local modal control for AuthForm
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
   useEffect(() => {
-    // Require login: redirect if no username/token
-    const username = localStorage.getItem("username");
+    // If not logged in, show auth modal
     const token = localStorage.getItem("token");
-    if (!username || !token) {
-      alert("Please log in before joining or starting a meeting.");
-      window.location.href = "/dashboard/home";
+    const username = localStorage.getItem("username");
+    if (!token || !username) {
+      setShowAuthModal(true);
     }
   }, []);
 
+  // Called by AuthForm when login/signup succeeds.
+  // AuthForm writes token/username to localStorage itself (it already does), so we just hide modal.
+  const handleOnLogin = () => {
+    setShowAuthModal(false);
+
+    // If we don't yet have a name for cc_user_name, pre-populate with username.
+    const stored = localStorage.getItem("cc_user_name");
+    if (!stored) {
+      const uname = localStorage.getItem("username") || "";
+      if (uname) setName(uname);
+    }
+  };
+
   const handleJoin = () => {
+    // Ensure logged in again (in case modal dismissed)
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setShowAuthModal(true);
+      return;
+    }
+
     if (!name.trim()) {
       alert("Please enter your name before joining the meeting.");
       return;
     }
 
+    // Save the display name locally
     localStorage.setItem("cc_user_name", name.trim());
-    navigate(`/meeting/${roomId}?name=${encodeURIComponent(name)}&host=${isHost}`);
+
+    // Navigate to meeting page (MeetingRoom will read name & host)
+    navigate(`/meeting/${roomId}?name=${encodeURIComponent(name.trim())}&host=${isHost}`);
   };
 
   return (
@@ -38,9 +64,7 @@ export default function JoinMeeting() {
             <Video className="text-blue-400 w-10 h-10" />
           </div>
 
-          <h1 className="text-3xl font-bold">
-            {isHost ? "Start Your Meeting" : "Join Meeting"}
-          </h1>
+          <h1 className="text-3xl font-bold">{isHost ? "Start Your Meeting" : "Join Meeting"}</h1>
           <p className="text-gray-400 text-sm">
             {isHost ? "You’re creating a new meeting room." : "Enter your name to join this meeting."}
           </p>
@@ -53,9 +77,7 @@ export default function JoinMeeting() {
         </div>
 
         <div className="mt-6">
-          <label className="block mb-2 text-sm font-medium text-gray-300">
-            Your Name
-          </label>
+          <label className="block mb-2 text-sm font-medium text-gray-300">Your Name</label>
           <div className="flex items-center bg-gray-800 rounded-lg px-3 py-2 border border-gray-700 focus-within:ring-2 focus-within:ring-blue-500">
             <User className="text-gray-400 mr-2" size={18} />
             <input
@@ -87,6 +109,23 @@ export default function JoinMeeting() {
           By continuing, you agree to Collab Connect’s collaboration policies.
         </p>
       </div>
+
+      {/* Auth Modal overlay */}
+      {showAuthModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="relative w-full max-w-md">
+            <button
+              onClick={() => setShowAuthModal(false)}
+              className="absolute top-2 right-2 text-white text-xl"
+            >
+              ✕
+            </button>
+
+            {/* Pass onLogin handler — AuthForm writes token/username to localStorage and navigates -> dashboard by default; onLogin here will hide modal and let user continue */}
+            <AuthForm onLogin={handleOnLogin} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
