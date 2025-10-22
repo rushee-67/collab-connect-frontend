@@ -7,6 +7,7 @@ import AuthForm from "./AuthForm.jsx";
 import ProtectedRoute from "./ProtectedRoute.jsx";
 import { v4 as uuidv4 } from "uuid";
 import ScheduleMeeting from "../pages/ScheduleMeeting.jsx";
+import UpcomingMeetings from "../pages/UpcomingMeetings.jsx";
 
 export default function Dashboard({
   isAuthenticated,
@@ -68,6 +69,17 @@ export default function Dashboard({
             element={
               <ProtectedRoute isAuthenticated={isAuthenticated} setShowAuthForm={setShowAuthForm}>
                 <ScheduleMeeting />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="upcoming"
+            element={
+              <ProtectedRoute
+                isAuthenticated={isAuthenticated}
+                setShowAuthForm={setShowAuthForm}
+              >
+                <UpcomingMeetings />
               </ProtectedRoute>
             }
           />
