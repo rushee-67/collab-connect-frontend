@@ -145,18 +145,8 @@ const useWebRTC = (roomId, userId, userName, isHost = false) => {
       };
 
       // add locally
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: message.id,
-          sender: message.userName,
-          message: message.text,
-          timestamp: message.timestamp,
-        },
-      ]);
-
-      // emit to backend (backend will broadcast to the room)
-      webrtcServiceRef.current.socket.emit("chat-message", { roomId, message });
+      // send message only via server, avoid local duplication
+      webrtcServiceRef.current.socket.emit('chat-message', { roomId, message });
     },
     [roomId, userId, userName]
   );
