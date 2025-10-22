@@ -1,5 +1,4 @@
 // src/components/Dashboard.jsx
-
 import { Routes, Route, useNavigate } from "react-router-dom";
 import Header from "./Layout/Header.jsx";
 import HomePage from "../pages/HomePage.jsx";
@@ -7,7 +6,7 @@ import UserProfile from "../pages/UserProfile.jsx";
 import AuthForm from "./AuthForm.jsx";
 import ProtectedRoute from "./ProtectedRoute.jsx";
 import { v4 as uuidv4 } from "uuid";
-import MeetingRoom from "../pages/MeetingRoom.jsx";
+import ScheduleMeeting from "../pages/ScheduleMeeting.jsx";
 
 export default function Dashboard({
   isAuthenticated,
@@ -25,20 +24,14 @@ export default function Dashboard({
   };
 
   const handleStartQuickMeeting = () => {
-  const newMeetingId = uuidv4();
-  // Navigate to join page as host
-  navigate(`/join/${newMeetingId}?host=true`);
-};
+    const newMeetingId = uuidv4();
+    navigate(`/join/${newMeetingId}?host=true`);
+  };
 
-const handleJoinMeeting = (meetingId) => {
-  if (meetingId.trim()) {
-    // Navigate to join page as participant
-    navigate(`/join/${meetingId.trim()}`);
-  }
-};
+  const handleJoinMeeting = (meetingId) => {
+    if (meetingId.trim()) navigate(`/join/${meetingId.trim()}`);
+  };
 
-
-  // Helper function to require login
   const requireAuth = () => {
     if (!isAuthenticated) {
       setShowAuthForm(true);
@@ -49,11 +42,7 @@ const handleJoinMeeting = (meetingId) => {
 
   return (
     <div className="min-h-screen bg-black text-white relative">
-      <Header
-        isAuthenticated={isAuthenticated}
-        setShowAuthForm={setShowAuthForm}
-      />
-
+      <Header isAuthenticated={isAuthenticated} setShowAuthForm={setShowAuthForm} />
       <div className="pt-24 px-6">
         <Routes>
           <Route
@@ -75,50 +64,16 @@ const handleJoinMeeting = (meetingId) => {
             }
           />
           <Route
-            path="upcoming"
-            element={
-              <ProtectedRoute isAuthenticated={isAuthenticated} setShowAuthForm={setShowAuthForm}>
-                <p>Upcoming meetings page</p>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="previous"
-            element={
-              <ProtectedRoute isAuthenticated={isAuthenticated} setShowAuthForm={setShowAuthForm}>
-                <p>Previous meetings page</p>
-              </ProtectedRoute>
-            }
-          />
-          <Route
             path="schedule"
             element={
               <ProtectedRoute isAuthenticated={isAuthenticated} setShowAuthForm={setShowAuthForm}>
-                <p>Schedule a meeting</p>
+                <ScheduleMeeting />
               </ProtectedRoute>
             }
           />
-          <Route
-            path="recordings"
-            element={
-              <ProtectedRoute isAuthenticated={isAuthenticated} setShowAuthForm={setShowAuthForm}>
-                <p>Recordings page</p>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="resources"
-            element={
-              <ProtectedRoute isAuthenticated={isAuthenticated} setShowAuthForm={setShowAuthForm}>
-                <p>Shared resources page</p>
-              </ProtectedRoute>
-            }
-          />
-          {/* New route for the meeting room */}
         </Routes>
       </div>
 
-      {/* Auth Modal */}
       {showAuthForm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="relative w-full max-w-md">
